@@ -24,7 +24,7 @@ async def cmd_start(message: Message):
         "━━━━━━━━━━━━━━━━━━━\n"
         "✨ *No ads. No watermarks. Pure content.*\n\n"
         "🔗 **Supported platforms:**\n"
-        "• 🎵 TikTok (Videos, Photo Slides & Audio)\n"
+        "• 🎵 TikTok (Videos & Photo Slides)\n"
         "• 📸 Instagram (Reels / Posts)\n"
         "• 🎬 YouTube (Shorts / Video)\n\n"
         "👉 *Just drop any link below and get your files!*"
@@ -47,14 +47,10 @@ async def download_media(message: Message):
     
     file_prefix = f"downloads_{message.from_user.id}"
     
-    # Налаштування для скачування як відео/фото, так і аудіо доріжок
     ydl_opts = {
         'outtmpl': f'{file_prefix}_%(id)s_%(autonumber)s.%(ext)s',
-        'extract_flat': False,
-        'writesubtitles': False,
+        'max_filesize': 50 * 1024 * 1024,
         'quiet': True,
-        # Дозволяємо витягувати аудіо для слайдшоу
-        'format': 'best/bestvideo+bestaudio/best',
     }
     
     try:
@@ -76,32 +72,30 @@ async def download_media(message: Message):
 
         photos = [f for f in downloaded_files if f.endswith(('.jpg', '.jpeg', '.png', '.webp'))]
         videos = [f for f in downloaded_files if f.endswith(('.mp4', '.mkv', '.webm'))]
-        audio = [f for f in downloaded_files if f.endswith(('.mp3', '.m4a', '.aac', '.opus', '.wav'))]
 
-        # Якщо є кілька фото (TikTok слайдшоу)
+        # Якщо це слайдшоу (кілька фото)
         if len(photos) > 1:
             await status_msg.delete()
             
             user_pending_downloads[message.from_user.id] = {
                 'photos': photos,
-                'audio': audio,
                 'prefix': file_prefix
             }
             
             choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📁 Send as Slideshow (Album)", callback_data="mode_album")],
-                [InlineKeyboardButton(text="📦 Send Separately + Audio Track", callback_data="mode_separate")]
+                [InlineKeyboardButton(text="📦 Send Separately", callback_data="mode_separate")]
             ])
             
             await message.answer(
                 "✨ **TikTok Slideshow detected!**\n"
-                "How would you like to receive the content?",
+                "How would you like to receive the photos?",
                 reply_markup=choice_keyboard,
                 parse_mode="Markdown"
             )
             return
 
-        # Звичайне відео чи одиничне фото
+        # Звичайне відео чи одиночне фото
         await status_msg.edit_text("📤 **Preparing file for delivery...**", parse_mode="Markdown")
         done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
@@ -191,12 +185,10 @@ async def callback_mode_separate(callback: CallbackQuery):
         
     data = user_pending_downloads[user_id]
     photos = data['photos']
-    audio = data['audio']
     
-    await callback.message.edit_text("📤 **Sending photos separately and audio track...**", parse_mode="Markdown")
+    await callback.message.edit_text("📤 **Sending photos separately...**", parse_mode="Markdown")
     
     try:
-        # Відправляємо кожну фотографію окремо
         for i, photo_file in enumerate(photos):
             if os.path.exists(photo_file):
                 with open(photo_file, "rb") as pf:
@@ -206,21 +198,10 @@ async def callback_mode_separate(callback: CallbackQuery):
                         caption=f"🖼 Photo #{i+1}"
                     )
         
-        # Якщо є аудіофайл, надсилаємо його як аудіо
-        if audio and os.path.exists(audio[0]):
-            with open(audio[0], "rb") as af:
-                audio_file = BufferedInputFile(af.read(), filename="tiktok_sound.mp3")
-                await callback.message.answer_audio(
-                    audio=audio_file,
-                    caption="🎵 **Original Audio Track**"
-                )
-        else:
-            await callback.message.answer("ℹ️ *Note: Individual audio track was not found for this specific post.*", parse_mode="Markdown")
-        
         done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
         ])
-        await callback.message.answer("✨ *All components extracted successfully!*", reply_markup=done_keyboard, parse_mode="Markdown")
+        await callback.message.answer("✨ *All photos sent successfully!*", reply_markup=done_keyboard, parse_mode="Markdown")
         
     except Exception as e:
         logging.error(f"Separate mode error: {e}")
@@ -234,7 +215,7 @@ async def callback_mode_separate(callback: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Advanced Media bot is online!")
+    print("Media bot is online!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

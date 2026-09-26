@@ -4,7 +4,7 @@ import os
 import sys
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import yt_dlp
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -14,7 +14,6 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    # Красива мінімалістична картка-вітання
     welcome_text = (
         "⚡ **MEDIA FETCH ENGINE**\n"
         "━━━━━━━━━━━━━━━━━━━\n"
@@ -32,7 +31,6 @@ async def cmd_start(message: Message):
     
     await message.answer(welcome_text, reply_markup=keyboard, parse_mode="Markdown")
 
-# Заглушка для красивої кнопки
 @dp.callback_query(F.data == "ping")
 async def callback_ping(callback: CallbackQuery):
     await callback.answer("I'm ready! Just send me the URL 📥", show_alert=True)
@@ -41,7 +39,6 @@ async def callback_ping(callback: CallbackQuery):
 async def download_media(message: Message):
     url = message.text.strip()
     
-    # Живіші статуси з анімацією процесу
     status_msg = await message.answer("🔄 **Connecting to source...**", parse_mode="Markdown")
     
     output_filename = f"downloads_{message.from_user.id}.mp4"
@@ -71,7 +68,6 @@ async def download_media(message: Message):
                 video_bytes = video_file.read()
                 input_file = BufferedInputFile(video_bytes, filename="media.mp4")
                 
-                # Кнопка під відео для зручності
                 done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
                 ])

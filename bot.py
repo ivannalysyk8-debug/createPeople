@@ -24,7 +24,7 @@ async def cmd_start(message: Message):
         "━━━━━━━━━━━━━━━━━━━\n"
         "✨ *No ads. No watermarks. Pure content.*\n\n"
         "🔗 **Supported platforms:**\n"
-        "• 🎵 TikTok (Videos & Photo Slides)\n"
+        "• 🎵 TikTok (Videos, Slides & Audio)\n"
         "• 📸 Instagram (Reels / Posts)\n"
         "• 🎬 YouTube (Shorts / Video)\n\n"
         "👉 *Just drop any link below and get your files!*"
@@ -47,8 +47,10 @@ async def download_media(message: Message):
     
     file_prefix = f"downloads_{message.from_user.id}"
     
+    # Налаштування yt-dlp для максимального захоплення медіа та аудіо
     ydl_opts = {
         'outtmpl': f'{file_prefix}_%(id)s_%(autonumber)s.%(ext)s',
+        'format': 'best/bestvideo+bestaudio/best',
         'max_filesize': 50 * 1024 * 1024,
         'quiet': True,
     }
@@ -72,6 +74,7 @@ async def download_media(message: Message):
 
         photos = [f for f in downloaded_files if f.endswith(('.jpg', '.jpeg', '.png', '.webp'))]
         videos = [f for f in downloaded_files if f.endswith(('.mp4', '.mkv', '.webm'))]
+        audios = [f for f in downloaded_files if f.endswith(('.mp3', '.m4a', '.aac', '.opus', '.wav'))]
 
         # Якщо це слайдшоу (кілька фото)
         if len(photos) > 1:
@@ -79,17 +82,19 @@ async def download_media(message: Message):
             
             user_pending_downloads[message.from_user.id] = {
                 'photos': photos,
+                'audios': audios,
+                'videos': videos,
                 'prefix': file_prefix
             }
             
             choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📁 Send as Slideshow (Album)", callback_data="mode_album")],
-                [InlineKeyboardButton(text="📦 Send Separately", callback_data="mode_separate")]
+                [InlineKeyboardButton(text="🎞️ Slideshow with Music (Video)", callback_data="mode_video")],
+                [InlineKeyboardButton(text="📁 Slides Separately + 🎵 Audio", callback_data="mode_separate")]
             ])
             
             await message.answer(
                 "✨ **TikTok Slideshow detected!**\n"
-                "How would you like to receive the photos?",
+                "Choose how you want to receive it:",
                 reply_markup=choice_keyboard,
                 parse_mode="Markdown"
             )
@@ -137,38 +142,50 @@ async def download_media(message: Message):
                 try: os.remove(file)
                 except: pass
 
-@dp.callback_query(F.data == "mode_album")
-async def callback_mode_album(callback: CallbackQuery):
+# Варіант 1: Слайд-шоу як відео з музикою (або перший наявний відеопотік)
+@dp.callback_query(F.data == "mode_video")
+async def callback_mode_video(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id not in user_pending_downloads:
         await callback.answer("⚠️ Session expired. Please send the link again.", show_alert=True)
         return
         
     data = user_pending_downloads[user_id]
+    videos = data['videos']
     photos = data['photos']
     
-    await callback.message.edit_text("📤 **Sending as a slideshow album...**", parse_mode="Markdown")
+    await callback.message.edit_text("📤 **Preparing slideshow video...**", parse_mode="Markdown")
     
     try:
-        media_group = []
-        for i, photo_file in enumerate(photos[:10]):
-            if os.path.exists(photo_file):
-                with open(photo_file, "rb") as pf:
-                    input_file = BufferedInputFile(pf.read(), filename=f"slide_{i}.jpg")
-                    caption = "✅ **Slideshow extracted!**" if i == 0 else None
-                    media_group.append(InputMediaPhoto(media=input_file, caption=caption, parse_mode="Markdown"))
-        
-        if media_group:
-            await callback.message.answer_media_group(media=media_group)
-            
         done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
         ])
-        await callback.message.answer("✨ *Done!*", reply_markup=done_keyboard, parse_mode="Markdown")
         
+        if videos:
+            with open(videos[0], "rb") as vf:
+                input_file = BufferedInputFile(vf.read(), filename="slideshow.mp4")
+                await callback.message.answer_video(
+                    video=input_file,
+                    caption="✅ **Slideshow video with music!**",
+                    reply_markup=done_keyboard,
+                    parse_mode="Markdown"
+                )
+        else:
+            # Якщо відеоверсія не сформувалась автоматично, відправляємо як альбом із повідомленням про музику
+            media_group = []
+            for i, photo_file in enumerate(photos[:10]):
+                if os.path.exists(photo_file):
+                    with open(photo_file, "rb") as pf:
+                        input_file = BufferedInputFile(pf.read(), filename=f"slide_{i}.jpg")
+                        caption = "✅ **Slideshow album**" if i == 0 else None
+                        media_group.append(InputMediaPhoto(media=input_file, caption=caption, parse_mode="Markdown"))
+            if media_group:
+                await callback.message.answer_media_group(media=media_group)
+            await callback.message.answer("✨ *Done!*", reply_markup=done_keyboard, parse_mode="Markdown")
+            
     except Exception as e:
-        logging.error(f"Album error: {e}")
-        await callback.message.answer("❌ Error sending album.")
+        logging.error(f"Video mode error: {e}")
+        await callback.message.answer("❌ Error sending file.")
     
     for file in os.listdir():
         if file.startswith(data['prefix']):
@@ -176,6 +193,7 @@ async def callback_mode_album(callback: CallbackQuery):
             except: pass
     del user_pending_downloads[user_id]
 
+# Варіант 2: Кожен слайд окремо + аудіо трек окремо
 @dp.callback_query(F.data == "mode_separate")
 async def callback_mode_separate(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -185,10 +203,12 @@ async def callback_mode_separate(callback: CallbackQuery):
         
     data = user_pending_downloads[user_id]
     photos = data['photos']
+    audios = data['audios']
     
-    await callback.message.edit_text("📤 **Sending photos separately...**", parse_mode="Markdown")
+    await callback.message.edit_text("📤 **Sending photos separately and audio track...**", parse_mode="Markdown")
     
     try:
+        # Надсилаємо кожне фото окремо
         for i, photo_file in enumerate(photos):
             if os.path.exists(photo_file):
                 with open(photo_file, "rb") as pf:
@@ -198,10 +218,19 @@ async def callback_mode_separate(callback: CallbackQuery):
                         caption=f"🖼 Photo #{i+1}"
                     )
         
+        # Надсилаємо аудіодоріжку, якщо вона є
+        if audios and os.path.exists(audios[0]):
+            with open(audios[0], "rb") as af:
+                audio_file = BufferedInputFile(af.read(), filename="tiktok_audio.mp3")
+                await callback.message.answer_audio(
+                    audio=audio_file,
+                    caption="🎵 **Original Audio Track**"
+                )
+        
         done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
         ])
-        await callback.message.answer("✨ *All photos sent successfully!*", reply_markup=done_keyboard, parse_mode="Markdown")
+        await callback.message.answer("✨ *All components sent successfully!*", reply_markup=done_keyboard, parse_mode="Markdown")
         
     except Exception as e:
         logging.error(f"Separate mode error: {e}")

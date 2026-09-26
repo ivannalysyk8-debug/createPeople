@@ -4,7 +4,7 @@ import os
 import sys
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
 import yt_dlp
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -19,7 +19,7 @@ async def cmd_start(message: Message):
         "━━━━━━━━━━━━━━━━━━━\n"
         "✨ *No ads. No watermarks. Pure content.*\n\n"
         "🔗 **Supported platforms:**\n"
-        "• 🎵 TikTok\n"
+        "• 🎵 TikTok (Videos & Photo Slideshows)\n"
         "• 📸 Instagram (Reels / Posts)\n"
         "• 🎬 YouTube (Shorts / Video)\n\n"
         "👉 *Just drop any link below and get your file instantly!*"
@@ -41,36 +41,68 @@ async def download_media(message: Message):
     
     status_msg = await message.answer("🔄 **Connecting to source...**", parse_mode="Markdown")
     
-    output_filename = f"downloads_{message.from_user.id}.mp4"
+    # Префікс для збереження файлів користувача
+    file_prefix = f"downloads_{message.from_user.id}"
     
+    # Налаштування yt-dlp для максимальної сумісності (включно з фото та відео)
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'outtmpl': output_filename,
-        'max_filesize': 50 * 1024 * 1024,  # Ліміт Telegram 50 МБ
+        'outtmpl': f'{file_prefix}_%(id)s_%(autonumber)s.%(ext)s',
+        'max_filesize': 50 * 1024 * 1024,
         'quiet': True,
+        'skip_download': False,
     }
     
     try:
         await asyncio.sleep(0.5)
-        await status_msg.edit_text("⚙️ **Processing stream & bypassing limits...**", parse_mode="Markdown")
+        await status_msg.edit_text("⚙️ **Analyzing stream & extracting media...**", parse_mode="Markdown")
         
         loop = asyncio.get_running_loop()
+        extracted_info = {}
+        
         def download():
+            nonlocal extracted_info
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                info = ydl.extract_info(url, download=True)
+                extracted_info = info
                 
         await loop.run_in_executor(None, download)
         
-        if os.path.exists(output_filename):
-            await status_msg.edit_text("📤 **Preparing file for delivery...**", parse_mode="Markdown")
+        # Шукаємо всі файли, які завантажилися для цього користувача
+        downloaded_files = [f for f in os.listdir() if f.startswith(file_prefix)]
+        
+        if not downloaded_files:
+            await status_msg.edit_text("❌ **Error:** Could not extract media from this link.")
+            return
+
+        await status_msg.edit_text("📤 **Preparing files for delivery...**", parse_mode="Markdown")
+        
+        # Перевіряємо, чи це набір фотографій (slideshow) чи звичайне відео
+        photos = [f for f in downloaded_files if f.endswith(('.jpg', '.jpeg', '.png', '.webp'))]
+        videos = [f for f in downloaded_files if f.endswith(('.mp4', '.mkv', '.webm'))]
+        
+        done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
+        ])
+
+        if photos and len(photos) > 1:
+            # Якщо це слайдшоу з фотографій з TikTok
+            media_group = []
+            for i, photo_file in enumerate(photos[:10]): # Телеграм дозволяє до 10 фото в альбом
+                with open(photo_file, "rb") as pf:
+                    photo_bytes = pf.read()
+                    input_file = BufferedInputFile(photo_bytes, filename=f"slide_{i}.jpg")
+                    caption = "✅ **Successfully extracted slideshow!**\n⚡ *Powered by your personal bot.*" if i == 0 else None
+                    media_group.append(InputMediaPhoto(media=input_file, caption=caption, parse_mode="Markdown"))
             
-            with open(output_filename, "rb") as video_file:
+            await message.answer_media_group(media=media_group)
+            await message.answer("✨ *All slides downloaded successfully!*", reply_markup=done_keyboard, parse_mode="Markdown")
+            
+        elif videos:
+            # Якщо це звичайне відео
+            video_file_path = videos[0]
+            with open(video_file_path, "rb") as video_file:
                 video_bytes = video_file.read()
                 input_file = BufferedInputFile(video_bytes, filename="media.mp4")
-                
-                done_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📥 Download another one", callback_data="ping")]
-                ])
                 
                 await message.answer_video(
                     video=input_file,
@@ -78,24 +110,33 @@ async def download_media(message: Message):
                     reply_markup=done_keyboard,
                     parse_mode="Markdown"
                 )
-            
-            os.remove(output_filename)
-            await status_msg.delete()
         else:
-            await status_msg.edit_text("❌ **Error:** Could not extract media from this link.")
+            await status_msg.edit_text("❌ **Error:** Unsupported media format.")
+
+        # Очищуємо всі тимчасові файли
+        for file in downloaded_files:
+            if os.path.exists(file):
+                os.remove(file)
+                
+        await status_msg.delete()
             
     except Exception as e:
         logging.error(f"Error: {e}")
         try:
-            await status_msg.edit_text("⚠️ **Failed:** The file might be too large (>50MB) or protected.")
+            await status_msg.edit_text("⚠️ **Failed:** The file might be too large (>50MB) or restricted.")
         except Exception:
             pass
-        if os.path.exists(output_filename):
-            os.remove(output_filename)
+        # Прибираємо сміття у разі помилки
+        for file in os.listdir():
+            if file.startswith(file_prefix):
+                try:
+                    os.remove(file)
+                except:
+                    pass
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Sleek Media bot is online!")
+    print("Media bot with slideshow support is online!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

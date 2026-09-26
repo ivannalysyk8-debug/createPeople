@@ -44,13 +44,20 @@ async def download_media(message: Message):
     output_filename = f"downloads_{message.from_user.id}.mp4"
     
     # Жорсткі параметри, щоб качати виключно оптимальні за розміром відео (до 50мб)
-    ydl_opts = {
-        'format': 'best[filesize<50M]/best[ext=mp4]/best',
+      ydl_opts = {
+        'format': 'best[filesize<50M]/best',
         'outtmpl': output_filename,
         'max_filesize': 50 * 1024 * 1024,
         'quiet': True,
         'no_warnings': True,
-    }
+        # Додаємо заголовки браузера, щоб TikTok не блокував запити бота
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
+        }
+
     
     try:
         await asyncio.sleep(0.3)
